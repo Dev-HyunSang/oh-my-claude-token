@@ -4,8 +4,10 @@ A simple token usage monitor for Claude Code CLI. Displays your daily token cons
 
 ## Features
 
-- Automatic token usage display after each Claude Code response (via hooks)
-- Color-coded usage indicators (green/yellow/red)
+- Real-time session token tracking (input/output tokens)
+- Daily usage with remaining token estimate
+- Status line display in input field
+- Automatic display after each Claude Code response (via hooks)
 - Detailed statistics with `main.py`
 - Tracks usage across multiple models (Opus, Sonnet, Haiku)
 
@@ -23,7 +25,6 @@ cd oh-my-claude-token
   "hooks": {
     "Stop": [
       {
-        "matcher": "",
         "hooks": [
           {
             "type": "command",
@@ -36,7 +37,16 @@ cd oh-my-claude-token
 }
 ```
 
-3. Replace `/path/to/oh-my-claude-token` with your actual installation path.
+> **Note**: The Stop event does not support matchers, so do not include a `"matcher"` field.
+
+3. (Optional) Enable status line display (`~/.claude/settings.json`):
+```json
+{
+  "statusLineCommand": "python3 /path/to/oh-my-claude-token/status_line.py"
+}
+```
+
+4. Replace `/path/to/oh-my-claude-token` with your actual installation path.
 
 ## Usage
 
@@ -45,13 +55,21 @@ cd oh-my-claude-token
 Once installed, token usage is automatically displayed after each Claude Code response:
 
 ```
-[Today: 25K | Msgs: 42 | Turns: 5]
+[Session: 1.2K | In: 850 | Out: 350 | Today: 25.3K | Remain: ~474.7K]
 ```
 
-Colors:
-- Green: < 100K tokens
-- Yellow: < 300K tokens
-- Red: >= 300K tokens
+- **Session**: Current session total tokens
+- **In/Out**: Input and output tokens for the session
+- **Today**: Accumulated daily usage
+- **Remain**: Estimated remaining tokens based on daily limits
+
+### Status Line
+
+When configured, shows real-time info at the bottom of the input field:
+
+```
+Opus 4.5 | Ctx: 15% | Session: 1.2K | Today: 25.3K | Remain: ~474.7K | $0.12
+```
 
 ### Detailed Statistics
 
@@ -107,6 +125,18 @@ Claude Code stores usage statistics in `~/.claude/stats-cache.json`. This tool r
 - Message and tool call counts
 - Session statistics
 - Historical activity
+
+The `token_display.py` hook also reads the current session transcript for real-time token tracking.
+
+## Daily Token Limits
+
+Estimated daily limits used for remaining token calculation:
+
+| Model | Daily Limit |
+|-------|-------------|
+| Opus 4.5 | 500K |
+| Sonnet 4.5 | 1M |
+| Haiku 4.5 | 2M |
 
 ## Requirements
 

@@ -11,11 +11,19 @@ from pathlib import Path
 
 STATS_FILE = Path.home() / ".claude" / "stats-cache.json"
 
+# Estimated daily token limits (approximate)
+DAILY_LIMITS = {
+    "claude-opus-4-5-20251101": 500_000,
+    "claude-opus-4-6": 500_000,
+    "claude-sonnet-4-5-20250929": 1_000_000,
+    "claude-haiku-4-5-20251001": 2_000_000,
+}
+
 def format_tokens(tokens: int) -> str:
     if tokens >= 1_000_000:
         return f"{tokens / 1_000_000:.1f}M"
     elif tokens >= 1_000:
-        return f"{tokens / 1_000:.0f}K"
+        return f"{tokens / 1_000:.1f}K"
     return str(tokens)
 
 def get_hook_data():
@@ -27,6 +35,44 @@ def get_hook_data():
     except (json.JSONDecodeError, IOError):
         pass
     return {}
+
+def get_session_tokens(transcript_path: str) -> dict:
+    """Read current session tokens from transcript file"""
+    if not transcript_path:
+        return {}
+
+    path = Path(transcript_path)
+    if not path.exists():
+        return {}
+
+    total_input = 0
+    total_output = 0
+    total_cache_read = 0
+    total_cache_create = 0
+
+    try:
+        with open(path, "r") as f:
+            for line in f:
+                try:
+                    entry = json.loads(line)
+                    if entry.get("type") == "assistant":
+                        usage = entry.get("message", {}).get("usage", {})
+                        total_input += usage.get("input_tokens", 0)
+                        total_output += usage.get("output_tokens", 0)
+                        total_cache_read += usage.get("cache_read_input_tokens", 0)
+                        total_cache_create += usage.get("cache_creation_input_tokens", 0)
+                except json.JSONDecodeError:
+                    continue
+    except IOError:
+        return {}
+
+    return {
+        "input": total_input,
+        "output": total_output,
+        "cache_read": total_cache_read,
+        "cache_create": total_cache_create,
+        "total": total_input + total_output,
+    }
 
 def get_today_usage():
     if not STATS_FILE.exists():
@@ -42,14 +88,12 @@ def get_today_usage():
     daily_tokens = stats.get("dailyModelTokens", [])
     daily_activity = stats.get("dailyActivity", [])
 
-    # Get today's tokens
     tokens_today = {}
     for entry in daily_tokens:
         if entry.get("date") == today:
             tokens_today = entry.get("tokensByModel", {})
             break
 
-    # Get today's message count
     msgs_today = 0
     for entry in daily_activity:
         if entry.get("date") == today:
@@ -62,52 +106,48 @@ def get_today_usage():
     }
 
 def main():
-    # Try to get real-time data from hook
     hook_data = get_hook_data()
 
-    # Get accumulated usage from stats file
+    if hook_data.get("stop_hook_active"):
+        return
+
+    # Get real-time session tokens from transcript
+    transcript_path = hook_data.get("transcript_path", "")
+    session = get_session_tokens(transcript_path)
+
+    # Get accumulated daily usage
     usage = get_today_usage()
-
-    # Extract session info from hook if available
-    session_tokens = 0
-    stop_reason = hook_data.get("stop_reason", "")
-    num_turns = hook_data.get("num_turns", 0)
-
-    # Build output
-    reset = "\033[0m"
-    dim = "\033[90m"
-    green = "\033[32m"
-    yellow = "\033[33m"
-    red = "\033[31m"
 
     parts = []
 
-    # Show accumulated today usage from stats
+    # Show real-time session tokens
+    if session and session.get("total", 0) > 0:
+        parts.append(f"Session: {format_tokens(session['total'])}")
+        parts.append(f"In: {format_tokens(session['input'])}")
+        parts.append(f"Out: {format_tokens(session['output'])}")
+
+    # Show daily accumulated and remaining tokens
     if usage:
         tokens = usage["tokens"]
-        msgs = usage["messages"]
         total = sum(tokens.values()) if tokens else 0
+        if total > 0:
+            parts.append(f"Today: {format_tokens(total)}")
 
-        if total > 0 or msgs > 0:
-            if total < 100_000:
-                color = green
-            elif total < 300_000:
-                color = yellow
-            else:
-                color = red
-
-            parts.append(f"{color}Today: {format_tokens(total)}{reset}")
-            parts.append(f"Msgs: {msgs}")
-
-    # Show current session turns if available
-    if num_turns > 0:
-        parts.append(f"Turns: {num_turns}")
+        # Calculate remaining tokens based on primary model used
+        if tokens:
+            # Use the model with most usage as the primary model
+            primary_model = max(tokens.keys(), key=lambda m: tokens[m])
+            limit = DAILY_LIMITS.get(primary_model, 500_000)
+            remaining = max(0, limit - total)
+            parts.append(f"Remain: ~{format_tokens(remaining)}")
 
     if parts:
         output = " | ".join(parts)
-        print(f"{dim}[{reset}{output}{dim}]{reset}")
+        message = f"[{output}]"
     else:
-        print(f"{dim}[No usage data]{reset}")
+        message = "[No usage data]"
+
+    print(json.dumps({"systemMessage": message}))
 
 if __name__ == "__main__":
     main()
