@@ -2,7 +2,6 @@
 
 A simple token usage monitor for Claude Code CLI. Displays your daily token consumption after each response.
 
-![oh-my-claude-token](assets/oh-my-claude-token.gif)
 
 ## Features
 
